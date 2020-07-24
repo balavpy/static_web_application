@@ -1,0 +1,26 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "Udagram"
+  },
+  {
+    "ParameterKey": "UVPC",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "Pubsub1IP",
+    "ParameterValue": "10.0.0.0/24"
+  },
+  {
+    "ParameterKey": "Pubsub2IP",
+    "ParameterValue": "10.0.1.0/24"
+  },
+  {
+    "ParameterKey": "Privsub1IP",
+    "ParameterValue": "10.0.2.0/24"
+  },
+  {
+    "ParameterKey": "Privsub2IP",
+    "ParameterValue": "10.0.3.0/24"
+  }
+]

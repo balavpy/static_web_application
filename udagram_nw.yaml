@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Webapp with high availability and load balancing and website access it from outside internet.
+  The below are network infra preparation as IaC.
+Parameters:
+  ProjectName:
+    Description: The project is called as Udagram
+    Type: String
+  UVPC:
+    Description: This is VPC of the project.
+    Type: String
+    Default: 10.0.0.0/16
+  Pubsub1IP:
+    Description: public subnet A cidr ip range
+    Type: String
+    Default: 10.0.0.0/24
+  Pubsub2IP:
+    Description: public subnet B cidr ip range
+    Type: String
+    Default: 10.0.1.0/24
+  Privsub1IP:
+    Description: Private subnet A cidr ip range
+    Type: String
+    Default: 10.0.2.0/24
+  Privsub2IP:
+    Description: Private subnet B cidr ip range
+    Type: String
+    Default: 10.0.3.0/24
+Resources:
+#VPC Requirements
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Description: this is udagram vpc network
+    Properties:
+      CidrBlock: !Ref UVPC
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+#Internetgateway to access outside user
+  Internetgw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref ProjectName
+  #Internetgateway attached to VPC
+  Internetgwattachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref Internetgw
+      VpcId: !Ref VPC
+#Public subnet in replicated two AZ contain NAT Gateway and bastion server to access web server in private subnet
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref Pubsub1IP
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PublicSubnetA
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref Pubsub2IP
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PublicsubnetB
+#Private subnet in replicated two AZ.
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref Privsub1IP
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PrivatesubnetA
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref Privsub2IP
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PrivatesubnetB
+#Elastic IP to ensure the IP is static without change on every restart
+  NatGatewayIP1:
+    Type: AWS::EC2::EIP
+    DependsOn: Internetgwattachment
+    Properties:
+      Domain: vpc
+  NatGatewayIP2:
+    Type: AWS::EC2::EIP
+    DependsOn: Internetgwattachment
+    Properties:
+      Domain: vpc
+#Natgatway to secure private subnet network with replicated AZ
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayIP1.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} NatGW1
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayIP2.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} NatGW2
+#Public route table to receive all the internet user request from internet gateway in replicated AZ
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PublicRoute
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Internetgw
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetAAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+  PublicSubnetBAttachment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+  #Private route table to receive all request from NAT gateway in replicated AZ
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PrivateRoute1
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+      RouteTableId: !Ref PrivateRouteTable1
+  PrivateSubnetAAttchment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnetA
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName} PrivateRoute2
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      NatGatewayId: !Ref NatGateway2
+      DestinationCidrBlock: 0.0.0.0/0
+  PrivateSubnetBAttchment:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnetB
+
+#Exportig the variable
+Outputs:
+  UDAVPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-VPCID
+  UDAPublicRouteTable:
+    Description: Public Routing
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub ${ProjectName}-PUBTAB
+  UDAPrivateRouteTable1:
+    Description: Private Routing AZ1
+    Value: !Ref PrivateRouteTable1
+    Export:
+      Name: !Sub ${ProjectName}-PRIVATETAB1
+  UDAPrivateRouteTable2:
+    Description: Private Routing AZ2
+    Value: !Ref PrivateRouteTable2
+    Export:
+      Name: !Sub ${ProjectName}-PRIVATETAB2
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join [ ",", [ !Ref PublicSubnetA, !Ref PublicSubnetB ]]
+    Export:
+      Name: !Sub ${ProjectName}-PUB-SUBNET
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join [ ",", [ !Ref PrivateSubnetA, !Ref PrivateSubnetB ]]
+    Export:
+      Name: !Sub ${ProjectName}-PRIV-SUBNET
+  UDAPublicSubnetA:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref PublicSubnetA
+    Export:
+      Name: !Sub ${ProjectName}-PUB-SN1
+
+  UDAPublicSubnetB:
+    Description: A reference to the public subnet in the 2nd Availability Zone
+    Value: !Ref PublicSubnetB
+    Export:
+      Name: !Sub ${ProjectName}-PUB-SN2
+  UDAPrivateSubnetA:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnetA
+    Export:
+      Name: !Sub ${ProjectName}-PRIV-SN1
+  UDAPrivateSubnetB:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnetB
+    Export:
+      Name: !Sub ${ProjectName}-PRIV-SN2
+  UDAPubsub1IP:
+    Description: Public subet1 IP range
+    Value: !Ref Pubsub1IP
+    Export:
+      Name: !Sub ${ProjectName}-Pubsub1
+  UDAPubsub2IP:
+    Description: Public subet1 IP range
+    Value: !Ref Pubsub2IP
+    Export:
+      Name: !Sub ${ProjectName}-Pubsub2
